@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from math import log
 
-from .layers import FeatureExtractor, DuplicateUp
+from layers import FeatureExtractor, DuplicateUp, CordinateRegressor
 
 class DISPUGenerator(torch.nn.Module):
     """Disentangled refinement upsampler"""
@@ -17,6 +17,7 @@ class DISPUGenerator(torch.nn.Module):
                        fine_extractor=False,
                        refine=False,
                         **kwargs):
+        super(DISPUGenerator, self).__init__()
         self.up_ratio = up_ratio
         self.step_ratio = step_ratio
         self.knn = knn
@@ -34,17 +35,20 @@ class DISPUGenerator(torch.nn.Module):
             step_ratio=step_ratio, **kwargs)
 
         self.duplicate_ups = nn.ModuleDict()
-        for l in range(1, log(self.up_ratio, self.step_ratio)):
-            self.duplicate_ups[str(l)] = DuplicateUp(, **kwargs)
+        for l in range(int(log(self.up_ratio, self.step_ratio))):
+            if l != 0:
+                self.duplicate_ups[str(l)] = DuplicateUp(input_channels=128)
+            else:
+                self.duplicate_ups[str(l)] = DuplicateUp()
 
-        self.cordinate_regressor = CordinateRegressor(, **kwargs)
+        #self.cordinate_regressor = CordinateRegressor(, **kwargs)
 
     def forward(self, xyz):
         # extract features
         coarse_feat = self.feature_extractor(xyz)
         patch_num = self.points_per_patch
-        #loop log(up_ratio, step_size) and upsample (rQ)
-        for l in range(1, log(self.up_ratio, self.step_ratio)):
+        # upsample (rN)
+        for l in range(int(log(self.up_ratio, self.step_ratio))):
             coarse_feat = self.duplicate_ups[str(l)](coarse_feat)
             patch_num = int(self.step_ratio*patch_num)
 
@@ -52,3 +56,9 @@ class DISPUGenerator(torch.nn.Module):
         coarse = self.cordinate_regressor(coarse_feat)
         # refinement net
         pass
+
+
+if __name__ == "__main__":
+    sim_data = torch.rand((64, 3,  1024))
+    model = DISPUGenerator()
+    print(model(sim_data))

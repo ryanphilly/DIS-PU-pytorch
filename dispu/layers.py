@@ -1,3 +1,4 @@
+from math import sqrt
 import torch 
 import torch.nn as nn
 from utils.base_layers import DenseEdgeConv, Conv2d, Conv1d
@@ -43,10 +44,41 @@ class FeatureExtractor(nn.Module):
         return x
 
 class DuplicateUp(nn.Module):
-    def __init__(self, up_ratio=4):
-        pass
-    
-    def make_grid(self):
+    def __init__(self, input_channels=480, up_ratio=4):
+        super(DuplicateUp,  self).__init__()
+        self.up_ratio = up_ratio
+        self.grid = self.make_grid(up_ratio)
+        self.mlp_down1 = Conv2d(input_channels+2, 256, 1, activation='relu')
+        self.mlp_down2 = Conv2d(256,  128, 1, activation='relu')
+
+    def make_grid(self, up_ratio):
+        grid_size = int(sqrt(up_ratio)) + 1
+        x = torch.linspace(-0.2, 0.2, grid_size, dtype=torch.float32)
+        x, y = torch.meshgrid(x, x)
+        grid = torch.stack([x, y], dim=0).view([2, grid_size * grid_size])
+        return grid.unsqueeze(0) # 1x2xgrid_size*grid_size
+
+    def forward(self, x):
+        B, _, N = x.size()
+        _, _, ratio = self.grid.size()
+        # 1x2xN*r
+        code = self.grid.repeat(x.size(0), 1, N)
+        code = code.to(device=x.device)
+        # BxCxN -> BxCxNxr
+        x = x.unsqueeze(-1).expand(-1, -1, -1, ratio)
+        # BxCx(N*r)
+        x = torch.reshape(x, [B, x.size(1), N * ratio]).contiguous()
+        # Bx(C+2)xNr
+        x = torch.cat([x, code], dim=1)
+
+        x = x.unsqueeze(-1)
+        # Bx128xNr
+        x = self.mlp_down2(self.mlp_down1(x))
+        x = torch.reshape(x, [B, x.size(1), N * ratio]).contiguous()
+        return x
+
+class CordinateRegressor(nn.Module):
+    def __init__(self):
         pass
 
     def forward(self, x):
@@ -54,5 +86,6 @@ class DuplicateUp(nn.Module):
 
 if __name__ == "__main__":
     sim_data = torch.rand((64, 3, 1024)).to('cuda:0')
-    x= FeatureExtractor().to('cuda:0')
-    print(x(sim_data).shape)
+    x = FeatureExtractor().to('cuda:0')
+    y = DuplicateUp(edge=False).to('cuda:0')
+    print(y(x(sim_data)).shape)
