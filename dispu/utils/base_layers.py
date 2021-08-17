@@ -1,7 +1,7 @@
 """Author: Yifan Wang  yifan.wang@inf.ethz.ch"""
 import torch
 import torch.nn as nn
-from operations import group_knn
+from .operations import group_knn
 
 class DenseEdgeConv(nn.Module):
     """docstring for EdgeConv"""
