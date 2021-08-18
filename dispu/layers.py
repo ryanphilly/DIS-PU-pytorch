@@ -11,7 +11,6 @@ class FeatureExtractor(nn.Module):
         self.step_ratio = step_ratio
         comp = growth_rate*2
         # TODO: make in_channels calculate channels dynamicaly based on growth rate
-        # currently only works for growth_rate = 24
         in_channels = point_channels
         self.layer0 = Conv2d(in_channels, 24, [1, 1], activation=None)
         self.layer1 = DenseEdgeConv(24, growth_rate=growth_rate, n=dense_n, k=knn)
