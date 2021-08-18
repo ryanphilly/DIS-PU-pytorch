@@ -12,7 +12,7 @@ from layers import (
 class RefinedGenerator(torch.nn.Module):
     """Disentangled Point Cloud Up Sampler and Refiner"""
     def __init__(self, point_channels=3,
-                       points_per_patch=234,
+                       points_per_patch=324,
                        up_ratio=16,
                        step_ratio=2,
                        knn=16,
@@ -43,9 +43,9 @@ class RefinedGenerator(torch.nn.Module):
         self.duplicate_ups = nn.ModuleDict()
         for l in range(int(log(self.up_ratio, self.step_ratio))):
             if l != 0:
-                self.duplicate_ups[str(l)] = DuplicateUp(input_channels=128, up_ratio=2)
+                self.duplicate_ups[str(l)] = DuplicateUp(input_channels=128, step_ratio=step_ratio)
             else:
-                self.duplicate_ups[str(l)] = DuplicateUp(input_channels=480, up_ratio=2)
+                self.duplicate_ups[str(l)] = DuplicateUp(input_channels=480, step_ratio=step_ratio)
 
         self.coarse_coordinate_regressor = CoordinateRegressor(128, point_channels, **kwargs)
 
@@ -92,10 +92,10 @@ class RefinedGenerator(torch.nn.Module):
     def forward(self, points):
         coarse, coarse_feat = self._generate_upsampled_cloud(points)
         fine, _ = self._refine(coarse, coarse_feat)
-        return coarse, fine
+        return coarse
 
 
 if __name__ == "__main__":
-    sim_data = torch.rand((1, 3,  116))
-    model = RefinedGenerator()
+    sim_data = torch.rand((64, 3,  2056))
+    model = RefinedGenerator(point_channels=3, knn=16)
     print(model(sim_data).shape)

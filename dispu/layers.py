@@ -45,8 +45,8 @@ class DuplicateUp(nn.Module):
         self.step = step_ratio
         self.grid = self.make_grid(step_ratio)
         input_channels = input_channels+2 if step_ratio >= 4 else input_channels+1
-        self.mlp_down1 = Conv2d(input_channels, 256, 1, activation='relu')
-        self.mlp_down2 = Conv2d(256,  128, 1, activation='relu')
+        self.conv_down1 = Conv2d(input_channels, 256, 1, activation='relu')
+        self.conv_down2 = Conv2d(256,  128, 1, activation='relu')
 
     def make_grid(self, step_ratio):
         grid_size = int(sqrt(step_ratio)) + 1
