@@ -27,10 +27,7 @@ class FeatureExtractor(nn.Module):
 
     def forward(self, xyz):
         """
-        :param
-            xyz  B x point_channels x N input xyz, normalized
-        :returns
-            xyz_featues BxCxN
+        B x point_channels(usually 3, 6, or 9) x N -> BxCxN
         """
         x = self.layer0(xyz.unsqueeze(dim=-1)).squeeze(dim=-1)
         y, _ = self.layer1(x)
@@ -44,19 +41,23 @@ class FeatureExtractor(nn.Module):
         return x
 
 class DuplicateUp(nn.Module):
-    def __init__(self, input_channels=480, up_ratio=4):
+    def __init__(self, input_channels=480, step_ratio=2):
         super(DuplicateUp,  self).__init__()
-        self.up_ratio = up_ratio
-        self.grid = self.make_grid(up_ratio)
-        self.mlp_down1 = Conv2d(input_channels+2, 256, 1, activation='relu')
+        self.step = step_ratio
+        self.grid = self.make_grid(step_ratio)
+        input_channels = input_channels+2 if step_ratio >= 4 else input_channels+1
+        self.mlp_down1 = Conv2d(input_channels, 256, 1, activation='relu')
         self.mlp_down2 = Conv2d(256,  128, 1, activation='relu')
 
-    def make_grid(self, up_ratio):
-        grid_size = int(sqrt(up_ratio)) + 1
+    def make_grid(self, step_ratio):
+        grid_size = int(sqrt(step_ratio)) + 1
         x = torch.linspace(-0.2, 0.2, grid_size, dtype=torch.float32)
-        x, y = torch.meshgrid(x, x)
-        grid = torch.stack([x, y], dim=0).view([2, grid_size * grid_size])
-        return grid.unsqueeze(0) # 1x2xgrid_size*grid_size
+        if step_ratio >= 4:
+            x, y = torch.meshgrid(x, x)
+            grid = torch.stack([x, y], dim=0).view([2, grid_size * grid_size])
+        else:
+            grid = x.view(1, grid_size)
+        return grid.unsqueeze(0) # 1x1xgrid_size or 1x2xgrid_size^2
 
     def forward(self, x):
         B, _, N = x.size()
@@ -77,15 +78,27 @@ class DuplicateUp(nn.Module):
         x = torch.reshape(x, [B, x.size(1), N * ratio]).contiguous()
         return x
 
-class CordinateRegressor(nn.Module):
+class CoordinateRegressor(nn.Module):
+    def __init__(self, in_channels=128, out_channels=3):
+        super(CoordinateRegressor, self).__init__()
+        self.lin1 = Conv1d(in_channels, 256, 1, activation='relu')
+        self.lin2 = Conv1d(256, 64, 1, activation='relu')
+        self.lin3 = Conv1d(64, out_channels, 1)
+
+    def forward(self, x):
+        return self.lin3(self.lin2(self.lin1(x)))
+
+class PointShuffle(nn.Module):
     def __init__(self):
+        super(PointShuffle, self).__init__()
         pass
 
     def forward(self, x):
         pass
 
 if __name__ == "__main__":
-    sim_data = torch.rand((64, 3, 1024)).to('cuda:0')
-    x = FeatureExtractor().to('cuda:0')
-    y = DuplicateUp(edge=False).to('cuda:0')
-    print(y(x(sim_data)).shape)
+    sim_data = torch.rand((4, 3, 1024))
+    x = FeatureExtractor()
+    y = DuplicateUp()
+    z = CoordinateRegressor()
+    print(z(y(x(sim_data))).shape)
