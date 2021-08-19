@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from primitive_layers import DenseEdgeConv, Conv2d, Conv1d
 from operations import group_knn, gather_nd
+
 class FeatureExtractor(nn.Module):
     """3PU Feature Extractor"""
     def __init__(self, point_channels=3, dense_n=3, growth_rate=24, knn=16, step_ratio=2, **kwargs):
