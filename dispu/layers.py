@@ -27,7 +27,7 @@ class FeatureExtractor(nn.Module):
 
     def forward(self, xyz):
         """
-        B x point_channels(usually 3, 6, or 9) x N -> BxCxN
+        B x point_channels x N -> BxCxN
         """
         x = self.layer0(xyz.unsqueeze(dim=-1)).squeeze(dim=-1)
         y, _ = self.layer1(x)
@@ -60,22 +60,22 @@ class DuplicateUp(nn.Module):
         return grid.unsqueeze(0) # 1x1xgrid_size or 1x2xgrid_size^2
 
     def forward(self, x):
-        B, _, N = x.size()
-        _, _, ratio = self.grid.size()
-        # 1x2xN*r
-        code = self.grid.repeat(x.size(0), 1, N)
-        code = code.to(device=x.device)
-        # BxCxN -> BxCxNxr
-        x = x.unsqueeze(-1).expand(-1, -1, -1, ratio)
-        # BxCx(N*r)
-        x = torch.reshape(x, [B, x.size(1), N * ratio]).contiguous()
-        # Bx(C+2)xNr
-        x = torch.cat([x, code], dim=1)
-
+        # B x C x N -> B x 128 x rN
+        batch_size, _, num_points = x.size()
+        _, _, up_ratio = self.grid.size()
+        # 1 x 2 x N*r
+        grid = self.grid.repeat(x.size(0), 1, num_points)
+        grid = grid.to(device=x.device)
+        # B x C x N x r
+        x = x.unsqueeze(-1).expand(-1, -1, -1, up_ratio)
+        # B x C x (N*r)
+        x = torch.reshape(x, [batch_size, x.size(1), num_points * up_ratio]).contiguous()
+        # B x (C+2) x Nr
+        x = torch.cat([x, grid], dim=1)
         x = x.unsqueeze(-1)
-        # Bx128xNr
+        # B x 128 x Nr
         x = self.mlp_down2(self.mlp_down1(x))
-        x = torch.reshape(x, [B, x.size(1), N * ratio]).contiguous()
+        x = x.view((batch_size, x.size(1), num_points * up_ratio)).contiguous()
         return x
 
 class CoordinateRegressor(nn.Module):
@@ -89,35 +89,39 @@ class CoordinateRegressor(nn.Module):
         return self.lin3(self.lin2(self.lin1(x)))
 
 class PointShuffle(nn.Module):
-    def __init__(self, knn=16, use_points=True):
+    def __init__(self, mlp_channels=[], knn=16, use_points=True):
         super(PointShuffle, self).__init__()
         self.knn = knn
         self.use_points = use_points
+        self.mlp_channels = mlp_channels
         pass
 
-    def _grouping(self, points, point_features):
-        B, _, N = point_features.size()
-        _, idx, _ = group_knn(self.knn, points, points)
-        batch_indices = torch.arange(0, B, 1).view(-1, 1, 1, 1)
-        batch_indices = torch.tile(batch_indices, (1, 1, N, self.knn))
-        idx = idx.unsqueeze(1)
-        idx =  torch.cat([batch_indices, idx], dim=1)
-        idx = idx.view((B, 2, N, self.knn))
-
-        grouped_points = gather_nd(points, idx) # B x point_channels x N x knn
-        grouped_features = gather_nd(point_features, idx) # B x C x N x knn
+    def _grouping(self, points, point_features, query_points):
+        batch_size, _, num_points = query_points.size()
+        # B x M x knn
+        _, idx, _ = group_knn(self.knn, query_points, points)
+        # B x 1 x M x knn
+        batch_indices = torch.arange(0, batch_size, 1).view(-1, 1, 1, 1)
+        batch_indices = torch.tile(batch_indices, (1, 1, num_points, self.knn))
+        # B x 2 x M x knn
+        idx =  torch.cat([batch_indices, idx.unsqueeze(1)], dim=1)
+        idx = idx.view((batch_size, 2, num_points, self.knn))
+        # B x point_channels x N x knn
+        grouped_points = gather_nd(points, idx)
+        # B x C x N x knn
+        grouped_features = gather_nd(point_features, idx) 
         if self.use_points:
-            grouped_features = torch.cat([grouped_features, grouped_features], dim=1)
+            grouped_features = torch.cat([grouped_points, grouped_features], dim=1)
 
         return grouped_points, grouped_features, idx
 
-    def forward(self, points, point_features):
-       return self._grouping(points, point_features)
+    def forward(self, points, point_features, query_points):
+       return self._grouping(points, point_features, query_points)
 
 if __name__ == "__main__":
-    sim_points = torch.rand((4, 3, 1024))
-    sim_feats = torch.rand((4, 24, 1024))
+    sim_points = torch.rand((64, 3, 1024))
+    sim_feats = torch.rand((64, 24, 1024))
     model = PointShuffle()
-    print(model(sim_points, sim_feats)[1].shape)
+    print(model(sim_points, sim_feats, sim_points)[1].shape)
 
   
