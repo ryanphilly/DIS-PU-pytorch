@@ -1,8 +1,8 @@
 from math import sqrt
 import torch 
 import torch.nn as nn
-from utils.base_layers import DenseEdgeConv, Conv2d, Conv1d
-
+from primitive_layers import DenseEdgeConv, Conv2d, Conv1d
+from operations import group_knn, gather_nd
 class FeatureExtractor(nn.Module):
     """3PU Feature Extractor"""
     def __init__(self, point_channels=3, dense_n=3, growth_rate=24, knn=16, step_ratio=2, **kwargs):
@@ -88,16 +88,35 @@ class CoordinateRegressor(nn.Module):
         return self.lin3(self.lin2(self.lin1(x)))
 
 class PointShuffle(nn.Module):
-    def __init__(self):
+    def __init__(self, knn=16, use_points=True):
         super(PointShuffle, self).__init__()
+        self.knn = knn
+        self.use_points = use_points
         pass
 
-    def forward(self, x):
-        pass
+    def _grouping(self, points, point_features):
+        B, _, N = point_features.size()
+        _, idx, _ = group_knn(self.knn, points, points)
+        batch_indices = torch.arange(0, B, 1).view(-1, 1, 1, 1)
+        batch_indices = torch.tile(batch_indices, (1, 1, N, self.knn))
+        idx = idx.unsqueeze(1)
+        idx =  torch.cat([batch_indices, idx], dim=1)
+        idx = idx.view((B, 2, N, self.knn))
+
+        grouped_points = gather_nd(points, idx) # B x point_channels x N x knn
+        grouped_features = gather_nd(point_features, idx) # B x C x N x knn
+        if self.use_points:
+            grouped_features = torch.cat([grouped_features, grouped_features], dim=1)
+
+        return grouped_points, grouped_features, idx
+
+    def forward(self, points, point_features):
+       return self._grouping(points, point_features)
 
 if __name__ == "__main__":
-    sim_data = torch.rand((4, 3, 1024))
-    x = FeatureExtractor()
-    y = DuplicateUp()
-    z = CoordinateRegressor()
-    print(z(y(x(sim_data))).shape)
+    sim_points = torch.rand((4, 3, 1024))
+    sim_feats = torch.rand((4, 24, 1024))
+    model = PointShuffle()
+    print(model(sim_points, sim_feats)[1].shape)
+
+  

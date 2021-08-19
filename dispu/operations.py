@@ -1,7 +1,18 @@
-"""Author: Yifan Wang yifan.wang@inf.ethz.ch"""
 import torch
 import numpy as np
+
 import sampling
+
+def gather_nd(inputs, indices):
+    """
+    pytorch version of tf.gather_nd
+    :param
+    inputs: BxCxN
+    indices: Bx2xNxknn
+    """
+    B, C, N = inputs.size()
+    gather = inputs[indices[:,0,:,:], :, indices[:,1,:,:]]
+    return gather.view(B, C, N, -1)
 
 def normalize_point_batch(pc, NCHW=True):
     """
@@ -90,6 +101,54 @@ def group_knn(k, query, points, unique=True, NCHW=True):
 
     return knn_trans, point_indices, -distances
 
+class GatherFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, features, idx):
+        r"""
+        Parameters
+        ----------
+        features : torch.Tensor
+            (B, C, N) tensor
+        idx : torch.Tensor
+            (B, npoint) tensor of the features to gather
+        Returns
+        -------
+        torch.Tensor
+            (B, C, npoint) tensor
+        """
+        features = features.contiguous()
+        idx = idx.contiguous()
+        idx = idx.to(dtype=torch.int32)
+
+        B, npoint = idx.size()
+        _, C, N = features.size()
+
+        output = torch.empty(
+            B, C, npoint, dtype=features.dtype, device=features.device)
+        output = sampling.gather_forward(
+            B, C, N, npoint, features, idx, output
+        )
+
+        ctx.save_for_backward(idx)
+        ctx.C = C
+        ctx.N = N
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        idx, = ctx.saved_tensors
+        B, npoint = idx.size()
+
+        grad_features = torch.zeros(
+            B, ctx.C, ctx.N, dtype=grad_out.dtype, device=grad_out.device)
+        grad_features = sampling.gather_backward(
+            B, ctx.C, ctx.N, npoint, grad_out.contiguous(), idx, grad_features
+        )
+
+        return grad_features, None
+
+gather_points = GatherFunction.apply
+
 class FurthestPointSampling(torch.autograd.Function):
 
     @staticmethod
@@ -120,5 +179,27 @@ class FurthestPointSampling(torch.autograd.Function):
         ctx.mark_non_differentiable(idx)
         return idx
 
-
 __furthest_point_sample = FurthestPointSampling.apply
+
+
+def furthest_point_sample(xyz, npoint, NCHW=True):
+    """
+    :param
+        xyz (B, 3, N) or (B, N, 3)
+        npoint a constant
+    :return
+        torch.LongTensor
+            (B, npoint) tensor containing the indices
+        torch.FloatTensor
+            (B, npoint, 3) or (B, 3, npoint) point sets"""
+    assert(xyz.dim() == 3), "input for furthest sampling must be a 3D-tensor, but xyz.size() is {}".format(xyz.size())
+    # need transpose
+    if NCHW:
+        xyz = xyz.transpose(2, 1).contiguous()
+
+    assert(xyz.size(2) == 3), "furthest sampling is implemented for 3D points"
+    idx = __furthest_point_sample(xyz, npoint)
+    sampled_pc = gather_points(xyz.transpose(2, 1).contiguous(), idx)
+    if not NCHW:
+        sampled_pc = sampled_pc.transpose(2, 1).contiguous()
+    return idx, sampled_pc

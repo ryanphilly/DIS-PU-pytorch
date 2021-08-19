@@ -20,7 +20,7 @@ class RefinedGenerator(torch.nn.Module):
                        dense_n=3,
                        fine_extractor=True,
                        refine=True,
-                       is_off=True,
+                       offset=True,
                         **kwargs):
         super(RefinedGenerator, self).__init__()
         self.up_ratio = up_ratio
@@ -30,7 +30,7 @@ class RefinedGenerator(torch.nn.Module):
         self.points_per_patch = points_per_patch
         self.fine_extractor = fine_extractor
         self.refine = refine
-        self.is_off = is_off
+        self.offset = offset
         self.num_out_points = int(points_per_patch*up_ratio)
 
         self.coarse_feature_extractor = FeatureExtractor(
@@ -61,10 +61,10 @@ class RefinedGenerator(torch.nn.Module):
             self.point_shuffle = PointShuffle()
             self.fine_coordinate_regressor = CoordinateRegressor()
 
-    def _generate_upsampled_cloud(self, points):
-        """Upsample network"""
+    def _generate_dense_cloud(self, points):
+        """Dense Generator"""
         coarse_feat = self.coarse_feature_extractor(points)
-        # upsample (rN)
+        # feature expansion (rN)
         for l in range(int(log(self.up_ratio, self.step_ratio))):
             coarse_feat = self.duplicate_ups[str(l)](coarse_feat)
 
@@ -72,7 +72,7 @@ class RefinedGenerator(torch.nn.Module):
         return coarse, coarse_feat
 
     def _refine(self, coarse, coarse_feat):
-        """Refinement network"""
+        """Spatial Refiner"""
         if self.fine_extractor:
             fine_feat = self.fine_feature_extractor(coarse)
             fine_feat = torch.cat([fine_feat, coarse_feat], dim=1)
@@ -82,15 +82,14 @@ class RefinedGenerator(torch.nn.Module):
         if self.refine:
             new_coarse, fine_feat = self.point_shuffle(coarse, fine_feat)
             fine = self.fine_coordinate_regressor(fine_feat)
-            if self.is_off:
-                fine = fine + new_coarse
+            if self.offset: fine = fine + new_coarse
         else:
             fine = coarse
 
         return fine, fine_feat
 
     def forward(self, points):
-        coarse, coarse_feat = self._generate_upsampled_cloud(points)
+        coarse, coarse_feat = self._generate_dense_cloud(points)
         fine, _ = self._refine(coarse, coarse_feat)
         return coarse
 
