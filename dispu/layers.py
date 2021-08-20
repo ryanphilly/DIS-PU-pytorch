@@ -1,6 +1,8 @@
 from math import sqrt
+
 import torch 
 import torch.nn as nn
+
 from primitive_layers import DenseEdgeConv, Conv2d, Conv1d
 from operations import group_knn, gather_nd
 
@@ -46,8 +48,8 @@ class DuplicateUp(nn.Module):
         self.step = step_ratio
         self.grid = self.make_grid(step_ratio)
         input_channels = input_channels+2 if step_ratio >= 4 else input_channels+1
-        self.conv_down1 = Conv2d(input_channels, 256, 1, activation='relu')
-        self.conv_down2 = Conv2d(256,  128, 1, activation='relu')
+        self.mlp_down1 = Conv2d(input_channels, 256, 1, activation='relu')
+        self.mlp_down2 = Conv2d(256,  128, 1, activation='relu')
 
     def make_grid(self, step_ratio):
         grid_size = int(sqrt(step_ratio)) + 1
@@ -89,13 +91,27 @@ class CoordinateRegressor(nn.Module):
         return self.lin3(self.lin2(self.lin1(x)))
 
 class PointShuffle(nn.Module):
-    def __init__(self, mlp_channels=[], knn=16, use_points=True):
+    def __init__(self, in_channels, point_channels=3, mlp_channels=[], knn=16, use_points=True, refine_points=True, non_local=True, local=True):
         super(PointShuffle, self).__init__()
         self.knn = knn
+        self.in_channels = in_channels+point_channels if not use_points else in_channels+point_channels+point_channels
+        self.out_channels = mlp_channels[-1]
         self.use_points = use_points
-        self.mlp_channels = mlp_channels
-        pass
+        self.refine_points = refine_points
+        self.non_local = non_local
+        self.local = local
 
+        self.spatial_skip_mlp = Conv1d(self.in_channels, self.out_channels, 1, activation='relu')
+        self.mlps = nn.ModuleList()
+        self.mlps.append(Conv2d(self.in_channels, mlp_channels[0], 1, activation='relu'))
+        for l in range(1, len(mlp_channels)):
+            self.mlps.append(Conv2d(mlp_channels[l-1], mlp_channels[l], 1, activation='relu'))
+
+        self.hidden_net = Conv2d(point_channels, knn, 1, activation='relu')
+        self.output_mlp1 = Conv2d(self.out_channels, self.out_channels, 1, activation='relu')
+        self.output_mlp2 = Conv1d(self.out_channels*2, self.out_channels, 1, activation='relu')   
+
+        
     def _grouping(self, points, point_features, query_points):
         batch_size, _, num_points = query_points.size()
         # B x M x knn
@@ -116,12 +132,43 @@ class PointShuffle(nn.Module):
         return grouped_points, grouped_features, idx
 
     def forward(self, points, point_features, query_points):
-       return self._grouping(points, point_features, query_points)
+        new_points = points
+        grouped_points, grouped_features, idx = self._grouping(points, point_features, query_points)
+  
+        grouped_points -= torch.tile(new_points.unsqueeze(3), (1, 1, 1, self.knn))
+        grouped_features = torch.cat([grouped_features, grouped_points], dim=1)
+   
+        if self.refine_points:
+            pass
+
+        if self.non_local:
+            pass
+        
+        spatial_skip_connecttion, _ = torch.max(grouped_features, dim=3, keepdim=False)
+        spatial_skip_connecttion = self.spatial_skip_mlp(spatial_skip_connecttion)
+        for mlp in self.mlps:
+            grouped_features = mlp(grouped_features)
+
+        '''
+        weight = self.hidden_net(grouped_points)
+        print(weight.shape)
+        grouped_features = torch.transpose(grouped_features, 3, 1)
+        print(grouped_features.shape)
+        grouped_features = grouped_features @ weight
+        print(grouped_features.shape)
+        '''
+        grouped_features = self.output_mlp1(grouped_features)
+        grouped_features = grouped_features.mean(3)
+        grouped_features = torch.cat([grouped_features, spatial_skip_connecttion], dim=1)
+        grouped_features = self.output_mlp2(grouped_features)
+
+        return new_points, grouped_features
+
 
 if __name__ == "__main__":
     sim_points = torch.rand((64, 3, 1024))
     sim_feats = torch.rand((64, 24, 1024))
-    model = PointShuffle()
+    model = PointShuffle(24, mlp_channels=[64, 128])
     print(model(sim_points, sim_feats, sim_points)[1].shape)
 
   

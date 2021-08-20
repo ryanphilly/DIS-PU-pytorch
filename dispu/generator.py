@@ -58,8 +58,8 @@ class RefinedGenerator(torch.nn.Module):
                 step_ratio=step_ratio, **kwargs)
 
         if refine:
-            self.point_shuffle = PointShuffle()
-            self.fine_coordinate_regressor = CoordinateRegressor()
+            self.point_shuffle = PointShuffle(608, point_channels=point_channels, mlp_channels=[62,128])
+            self.fine_coordinate_regressor = CoordinateRegressor(in_channels=128)
 
     def _generate_dense_cloud(self, points):
         """Dense Generator"""
@@ -80,7 +80,7 @@ class RefinedGenerator(torch.nn.Module):
             fine_feat = coarse_feat
 
         if self.refine:
-            new_coarse, fine_feat = self.point_shuffle(coarse, fine_feat)
+            new_coarse, fine_feat = self.point_shuffle(coarse, fine_feat, coarse)
             fine = self.fine_coordinate_regressor(fine_feat)
             if self.offset: fine = fine + new_coarse
         else:
@@ -91,10 +91,10 @@ class RefinedGenerator(torch.nn.Module):
     def forward(self, points):
         coarse, coarse_feat = self._generate_dense_cloud(points)
         fine, _ = self._refine(coarse, coarse_feat)
-        return coarse
+        return coarse, fine
 
 
 if __name__ == "__main__":
-    sim_data = torch.rand((64, 3,  2056))
+    sim_data = torch.rand((2, 3,  512))
     model = RefinedGenerator(point_channels=3, knn=16)
-    print(model(sim_data).shape)
+    print(model(sim_data)[1].shape)
