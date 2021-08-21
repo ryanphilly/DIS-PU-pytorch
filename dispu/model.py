@@ -1,6 +1,6 @@
 import torch
-
+from generator import RefinedGenerator
 
 class Model(torch.nn.Module):
   def __init__(self):
-    pass
+    self.generator = RefinedGenerator()
