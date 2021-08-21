@@ -58,7 +58,7 @@ class RefinedGenerator(torch.nn.Module):
                 step_ratio=step_ratio, **kwargs)
 
         if refine:
-            self.point_shuffle = PointShuffle(608, point_channels=point_channels, mlp_channels=[62,128])
+            self.point_shuffle = PointShuffle(480+128, point_channels=point_channels, mlp_channels=[64,128])
             self.fine_coordinate_regressor = CoordinateRegressor(in_channels=128)
 
     def _generate_dense_cloud(self, points):

@@ -91,7 +91,7 @@ class CoordinateRegressor(nn.Module):
         return self.lin3(self.lin2(self.lin1(x)))
 
 class PointShuffle(nn.Module):
-    def __init__(self, in_channels, point_channels=3, mlp_channels=[], knn=16, use_points=True, refine_points=True, non_local=True, local=True):
+    def __init__(self, in_channels, point_channels=3, mlp_channels=[128,128,256], knn=16, use_points=True, refine_points=True, non_local=True, local=True):
         super(PointShuffle, self).__init__()
         self.knn = knn
         self.in_channels = in_channels+point_channels if not use_points else in_channels+point_channels+point_channels
@@ -108,8 +108,8 @@ class PointShuffle(nn.Module):
             self.mlps.append(Conv2d(mlp_channels[l-1], mlp_channels[l], 1, activation='relu'))
 
         self.hidden_net = Conv2d(point_channels, knn, 1, activation='relu')
-        self.output_mlp1 = Conv2d(self.out_channels, self.out_channels, 1, activation='relu')
-        self.output_mlp2 = Conv1d(self.out_channels*2, self.out_channels, 1, activation='relu')   
+        self.output_mlp1 = Conv2d(knn, self.out_channels, kernel_size=[1, self.out_channels], activation='relu')
+        self.output_mlp2 = Conv1d(self.out_channels, self.out_channels, 1, activation='relu')   
 
         
     def _grouping(self, points, point_features, query_points):
@@ -157,9 +157,10 @@ class PointShuffle(nn.Module):
         grouped_features = grouped_features @ weight
         print(grouped_features.shape)
         '''
+        grouped_features = grouped_features.transpose(1, 3)
         grouped_features = self.output_mlp1(grouped_features)
-        grouped_features = grouped_features.mean(3)
-        grouped_features = torch.cat([grouped_features, spatial_skip_connecttion], dim=1)
+        grouped_features = grouped_features.squeeze(3)
+        grouped_features = grouped_features + spatial_skip_connecttion
         grouped_features = self.output_mlp2(grouped_features)
 
         return new_points, grouped_features
